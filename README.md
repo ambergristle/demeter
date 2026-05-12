@@ -16,7 +16,7 @@ Demeter is primarily focused on "garden" conditions, or specific diagnostics.
   - add plot- or plant-level nodes for additional granularity 
   - integrate with systems for garden management and plant cultivation
 
-| Sensor | | Unit |
+| Sensor | Type | Unit |
 | - | - | - |
 | Humidity | `number` | g/m<sup>3</sup> |
 | Temperature | `number` | C |
@@ -32,16 +32,56 @@ Demeter is primarily focused on "garden" conditions, or specific diagnostics.
 
 ## Architecture
 
+### Hardware
+- could start with the arduino (though not currently available)
+- otherwise need microcontroller, wifi chip, etc
+
 ### Client
 *Regularly dispatch data updates from connected sensors.*
 - Read from sensors (native board API?)
 - HTTP Client
+- Queue/Retries
+
+- maybe i'm overthinking this, but it seems like this should be as slim as possible
+    - it's not meant to do much of anything, and we want as much space as possible for a retry queue
 
 ### Services
 *Manage data persistence, provide data access, and dispatch alerts.*
 
+#### Record Tick
+
+- `POST` `/tick/{sensor_id}`
+
+- form-url-encode:
+
+| Property | Name | Type | Unit |
+| - | - | - | - |
+| sid | sensor_id | `string` | - |
+| t | timestamp | `number` | unix? UTC |
+| hum | humidity | `number` | g/m<sup>3</sup> |
+| tmp | temperature | `number` | C |
+| psr | air_pressure | `number` | Pa |
+| brt | brightness | `number` | lx |
+| smo | soil_moisture | `number \| undefined` | *relative* | % |
+
+#### Dashboard
+
+| Property | Type | Unit |
+| - | - | - |
+| timestamp | `number` | unix? UTC? |
+| humidity | `number` | g/m<sup>3</sup> |
+| temperature | `number` | C |
+| air_pressure | `number` | Pa |
+| brightness | `number` | lx |
+| soil_moisture | `number \| undefined` | *relative* | % |
+
 ### Persistence
 *Store data for short-term monitoring and long-term trend analysis.*
+
+- if the database is only backing a single client, sqlite should work fine for at least the first few years of continuous (hourly) data
+- how painful is it to migrate from sqlite to postgres?
+- realistically, to what extent is persistence even in scope?
+    - having a short-term window seems fine for now, and data could get pushed elsewhere
 
 ## Questions
 
