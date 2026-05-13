@@ -48,9 +48,9 @@ Demeter is primarily focused on "garden" conditions, or specific diagnostics.
 ### Services
 *Manage data persistence, provide data access, and dispatch alerts.*
 
-#### Record Tick
+#### Record Reading
 
-- `POST` `/tick/{sensor_id}`
+- `POST` `/readings/{sensor_id}`
 
 - form-url-encode:
 
@@ -64,7 +64,7 @@ Demeter is primarily focused on "garden" conditions, or specific diagnostics.
 | brt | brightness | `number` | lx |
 | smo | soil_moisture | `number \| undefined` | *relative* | % |
 
-#### Dashboard
+#### [Future] Dashboard
 
 | Property | Type | Unit |
 | - | - | - |
