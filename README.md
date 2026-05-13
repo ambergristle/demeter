@@ -10,11 +10,8 @@ Demeter tracks serial environmental data to support a few common use-cases:
 - Automation: Tune irrigation based on weather conditions.
 - Monitoring: Just in case the drip irrigation fails.
 
-Demeter is primarily focused on "garden" conditions, or specific diagnostics.
-- don't need to measure temperature for every plant individually
-- future:
-  - add plot- or plant-level nodes for additional granularity 
-  - integrate with systems for garden management and plant cultivation
+### Roadmap
+Demeter is primarily focused on "garden" conditions, or specific diagnostics, though plot- or plant-specific devices may be introduced if the additional granularity is justified.
 
 | Sensor | Type | Unit |
 | - | - | - |
@@ -24,66 +21,67 @@ Demeter is primarily focused on "garden" conditions, or specific diagnostics.
 | Light (Brightness) | `number` | lx |
 | Soil Moisture | `number` | *relative* | % |
 
-## Philosophy
-- software can empower individuals to enrich their lives and strengthen their communities
+
+It's meant primarily as an intermediary between the measuring device(s) and any services that want to consume the data.
+As such, its footprint will likely remain small, with additional functionality introduced through integrations.
+
+| Iteration | Device | Service |
+| - | - | - |
+| 0 | Tracks conditions for one "garden" | Writes readings to a local DB |
+| 1 | + (optionally) specific "plots" | - |
+| 2 | - | Calls registered webhook |
+| 3 | - | Supports multiple clients |
+
+
+### Philosophy
+- Software can empower individuals to enrich their lives and strengthen their communities.
+    - Good software has a clear scope, driven by user needs.
+- Automation can be liberating, but 
 - it's helpful to have data and automate things, but our obsession with efficiency has a horrific human and environmental cost
   - we should be mindful of how we're using resources: just because chips or compute are cheap to us, doesn't mean they're costless 
-- good software has a clear scope, driven by user needs
+- 
 
 ## Architecture
+In its simplest form, Demeter consists of:
+- a Device that collects readings from sensors and makes remote calls to,
+- a Service that can then persist (and/or relay) that data to a consumer
 
-### Hardware
-- could start with the arduino (though not currently available)
-- otherwise need microcontroller, wifi chip, etc
+### Device
+At a minimum, Demeter requries a board with the relevant environmental sensors and remote calling capabilities.
 
-### Client
+The MVP is the prefabricated Arduino Opla board, which includes all sensors, and an SDK to read and post data over WiFi. The board design can be optimized for cost and accessibility though, and subsequent iterations will attempt to address these issues.
+
+#### Client
 *Regularly dispatch data updates from connected sensors.*
-- Read from sensors (native board API?)
-- HTTP Client
-- Queue/Retries
 
-- maybe i'm overthinking this, but it seems like this should be as slim as possible
-    - it's not meant to do much of anything, and we want as much space as possible for a retry queue
+This could just be a library that Arduino users can import and use manually, but in the long term, packaging boards with firmware improves accessibility (and makes Demeter easier to commodify).
 
-### Services
+- Read from sensors and call remote service
+- Persist data locally short-term for retries?
+
+### Service
 *Manage data persistence, provide data access, and dispatch alerts.*
 
-#### Record Reading
+Additional clarity is needed regarding how the data should be used, or made available. Regardless, business logic shouldn't block data ingestion. Maximizing throughput is a priority for this layer.
 
-- `POST` `/readings/{sensor_id}`
+There are a few possible features with a clear value proposition:
+- Persist data
+    - Used to determine alert thresholds, but also possibly analytics, via dashboard and/or API
+- Dispatch alerts (if values change dramatically, or exceed fixed or configured thresholds).
 
-- form-url-encode:
+Writing to a local SQLite database is a solid short-term solution: its both fairly simple and pretty performant/scalable. Postgres seems excessive without a more concrete idea of how the data will be used (e.g., will Demeter include a dashboard, or just dispatch events).
 
-| Property | Name | Type | Unit |
-| - | - | - | - |
-| sid | sensor_id | `string` | - |
-| t | timestamp | `number` | unix? UTC |
-| hum | humidity | `number` | g/m<sup>3</sup> |
-| tmp | temperature | `number` | C |
-| psr | air_pressure | `number` | Pa |
-| brt | brightness | `number` | lx |
-| smo | soil_moisture | `number \| undefined` | *relative* | % |
+*How many of these questions should block development altogether?"
 
-#### [Future] Dashboard
+#### Endpoint
+
+`POST /readings/{sensor_id}`
 
 | Property | Type | Unit |
 | - | - | - |
-| timestamp | `number` | unix? UTC? |
+| timestamp | `number` | Unix? UTC? |
 | humidity | `number` | g/m<sup>3</sup> |
 | temperature | `number` | C |
 | air_pressure | `number` | Pa |
 | brightness | `number` | lx |
-| soil_moisture | `number \| undefined` | *relative* | % |
-
-### Persistence
-*Store data for short-term monitoring and long-term trend analysis.*
-
-- if the database is only backing a single client, sqlite should work fine for at least the first few years of continuous (hourly) data
-- how painful is it to migrate from sqlite to postgres?
-- realistically, to what extent is persistence even in scope?
-    - having a short-term window seems fine for now, and data could get pushed elsewhere
-
-## Questions
-
-- Should values be stored as one unit and converted on display (as needed), or should they be converted and stored in parallel?
-  - Storing multiple units doubles+ the persistence footprint, but converting on read could be fragile? 
+| soil_moisture | `number` | *relative, optional* | % |
