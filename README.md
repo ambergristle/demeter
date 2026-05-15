@@ -11,7 +11,7 @@ Demeter tracks serial environmental data to support a few common use-cases:
 - Monitoring: Just in case the drip irrigation fails.
 
 ### Roadmap
-Demeter is primarily focused on "garden" conditions, or specific diagnostics, though plot- or plant-specific devices may be introduced if the additional granularity is justified.
+Demeter is focused on "garden" conditions, or specific diagnostics, though plot- or plant-specific devices may be introduced if the additional granularity is justified.
 
 | Sensor | Type | Unit |
 | - | - | - |
@@ -21,25 +21,34 @@ Demeter is primarily focused on "garden" conditions, or specific diagnostics, th
 | Light (Brightness) | `number` | lx |
 | Soil Moisture | `number` | *relative* | % |
 
+There are a number of other inputs that could be collected and/or processed, namely:
+- pH
+- Nutrient levels
+- Image analysis (tracking color, growth, etc.)
 
-It's meant primarily as an intermediary between the measuring device(s) and any services that want to consume the data.
-As such, its footprint will likely remain small, with additional functionality introduced through integrations.
+These all require additional hardware though, and image analysis explodes project complexity. Support may be considered post-MVP, but is out of scope at this time.
 
-| Iteration | Device | Service |
+Demeter is an intermediary between the measuring device(s) and any services that want to consume the data.
+While the device itself is capable of making an HTTP request directly to consumers, handling request failures is much more challenging in a memory-constrained environment.
+**Demeter's core thesis is that it's cheaper to get data off the device ASAP, and ensure it's captured, regardless of how it's consumed.**
+
+In light of its goals, Demeter's footprint will likely remain small, with additional functionality introduced through integrations.
+
+| Iteration | Introduces |
 | - | - | - |
-| 0 | Tracks conditions for one "garden" | Writes readings to a local DB |
-| 1 | + (optionally) specific "plots" | - |
-| 2 | - | Calls registered webhook |
-| 3 | - | Supports multiple clients |
-
+| 0 | Service that validates Reading payload and makes signed call to registered webhook. |
+| 1 | Basic security and retry logic |
+| 2 | Queue or other overflow handler |
+| 3 | Logging and monitoring |
+| 4 | Accounts and registration, advanced security |
 
 ### Philosophy
-- Software can empower individuals to enrich their lives and strengthen their communities.
-    - Good software has a clear scope, driven by user needs.
-- Automation can be liberating, but 
-- it's helpful to have data and automate things, but our obsession with efficiency has a horrific human and environmental cost
-  - we should be mindful of how we're using resources: just because chips or compute are cheap to us, doesn't mean they're costless 
-- 
+
+**Software should empower individuals to enrich their lives and strengthen their communities.** Both in its intended use and its development, Demeter strives to increase knowledge, understanding, and collaboration.
+
+**Good software has a clear scope, driven by user needs.** Above all, Demeter is a public service. Its success is measured in the value it brings to users: what it enables them to create or share.
+
+**Value to one community shouldn't come at the expense of another.** Automation can be liberating, but we must be mindful of technology's "hidden" human and environmental costs.
 
 ## Architecture
 In its simplest form, Demeter consists of:
@@ -49,33 +58,33 @@ In its simplest form, Demeter consists of:
 ### Device
 At a minimum, Demeter requries a board with the relevant environmental sensors and remote calling capabilities.
 
-The MVP is the prefabricated Arduino Opla board, which includes all sensors, and an SDK to read and post data over WiFi. The board design can be optimized for cost and accessibility though, and subsequent iterations will attempt to address these issues.
+The MVP is the prefabricated [Arduino Opla](https://store.arduino.cc/products/arduino-opla-iot-kit) board, which includes all sensors, and an SDK to read and post data over WiFi.
+
+> *The board was on-hand, and does all the basics. This is not necessarily an endorsement of Arduino or the kit.*
+
+The board design can be optimized for cost and accessibility though, and subsequent iterations will attempt to address these issues.
 
 #### Client
 *Regularly dispatch data updates from connected sensors.*
 
 This could just be a library that Arduino users can import and use manually, but in the long term, packaging boards with firmware improves accessibility (and makes Demeter easier to commodify).
 
-- Read from sensors and call remote service
+- Read from sensors and call remote service.
 - Persist data locally short-term for retries?
 
 ### Service
-*Manage data persistence, provide data access, and dispatch alerts.*
+*Relay readings to registered callback. And more?*
+
+Demeter's backend is a minimal [Golang](https://golang.org/) server that exposes an endpoint to ingest readings.
+**Valid readings are forwarded to the registered callback with a signed request.**
 
 Additional clarity is needed regarding how the data should be used, or made available. Regardless, business logic shouldn't block data ingestion. Maximizing throughput is a priority for this layer.
 
-There are a few possible features with a clear value proposition:
-- Persist data
-    - Used to determine alert thresholds, but also possibly analytics, via dashboard and/or API
-- Dispatch alerts (if values change dramatically, or exceed fixed or configured thresholds).
+#### `POST /readings/{sensor_id}`
 
-Writing to a local SQLite database is a solid short-term solution: its both fairly simple and pretty performant/scalable. Postgres seems excessive without a more concrete idea of how the data will be used (e.g., will Demeter include a dashboard, or just dispatch events).
+The Readings endpoint forwards valid reading data to a registered callback.
 
-*How many of these questions should block development altogether?"
-
-#### Endpoint
-
-`POST /readings/{sensor_id}`
+*Value formats must be confirmed.*
 
 | Property | Type | Unit |
 | - | - | - |
@@ -84,4 +93,61 @@ Writing to a local SQLite database is a solid short-term solution: its both fair
 | temperature | `number` | C |
 | air_pressure | `number` | Pa |
 | brightness | `number` | lx |
-| soil_moisture | `number` | *relative, optional* | % |
+
+The callback request is secured with an [HMAC signature](https://en.wikipedia.org/wiki/HMAC).
+
+| Header | Value |
+| - | - |
+| `content-type` | `application/x-www-form-urlencoded` |
+| `x-demeter-timestamp` | Unix UTC timestamp |
+| `x-demeter-signature` | HMAC signature (body + timestamp) |
+
+## Verify callback requests
+
+1. Validate request timestamp
+```go
+// Get timestamp from Header, and parse to int
+requestTimestamp := r.Header.Get("x-demeter-timestamp")
+timestamp, err := strconv.ParseInt(requestTimestamp, 10, 64)
+// >> 1531420618
+if err != nil {
+    // Timestamp is invalid: reject
+}
+
+// Verify timestamp happened within 5 minutes of local time
+now := time.Now()
+stampTime := time.Unix(stamp, 0)
+timeDifference := now.Sub(stampTime).Abs().Seconds()
+if timeDifference > 60 * 5 {
+    // Possible replay attack: reject
+}
+```
+
+2. Construct the signature
+```go
+bodyBytes, err := io.ReadAll(resp.Body)
+if err != nil {
+    // Bad request: reject
+}
+
+signatureBase := "v0:" + timestamp + ":" + string(bodyBytes)
+// >> v0:1531420618:timestamp=1778870328&humidity=90&temperature=27...
+
+// Secret comes from somewhere
+mac := hmac.New(sha256.New, secret)
+mac.Write([]byte(signatureBase))
+
+signature := "v0=" + hex.EncodeToString(mac.Sum(nil))
+// >> v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503
+```
+
+4. Compare signatures
+```go
+requestSignature := r.Header.Get("x-demeter-signature")
+// >> v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503
+
+// Compare signature bytes without leaking timing info
+if !hmac.Equal([]byte(signature), []byte(requestSignature)) {
+    // Invalid signature: reject
+}
+```
