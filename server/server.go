@@ -9,13 +9,16 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func server(options *DemeterOptions) {
+	if len(options.callbackUrl) == 0 {
+		panic("Callback URL must be configured")
+	}
+
 	port := strconv.Itoa(options.port)
 
 	mux := http.NewServeMux()
@@ -32,7 +35,14 @@ func readingHandler(callbackUrl string, secret string) func(w http.ResponseWrite
 		switch r.Method {
 		case "POST":
 			sensorId := r.PathValue("sensorId")
-			fmt.Printf("client id: %s\n", sensorId)
+			if len(sensorId) < 1 {
+				http.Error(
+					w,
+					"Bad request: Path must include `sensorId`: `/readings/{sensorId}`",
+					http.StatusBadRequest,
+				)
+				return
+			}
 
 			err := r.ParseForm()
 			if err != nil {
@@ -44,13 +54,13 @@ func readingHandler(callbackUrl string, secret string) func(w http.ResponseWrite
 			// over URL params
 			reading, err := parseReading(&r.Form)
 			if err != nil {
-				http.Error(w, "Bad request", http.StatusBadRequest)
+				http.Error(w, "Bad request: "+err.Error(), http.StatusBadRequest)
 				return
 			}
 
 			err = dispatchEvent(callbackUrl, reading, []byte(secret))
 			if err != nil {
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
+				http.Error(w, "Internal server error: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 
@@ -64,7 +74,7 @@ func readingHandler(callbackUrl string, secret string) func(w http.ResponseWrite
 
 func parseReading(values *url.Values) (ReadingPayload, error) {
 	timestamp := values.Get("timestamp")
-	if !matchNumeric(timestamp) {
+	if !validateTimestamp(timestamp) {
 		return ReadingPayload{}, fmt.Errorf("Invalid parameter: timestamp")
 	}
 
@@ -98,9 +108,29 @@ func parseReading(values *url.Values) (ReadingPayload, error) {
 }
 
 func matchNumeric(text string) bool {
-	re := regexp.MustCompile(`^\d+(\.\d+){0,1}$`)
-	match := re.MatchString(text)
-	return match
+	for i, r := range text {
+		if r < '0' || r > '9' {
+			if r == '.' && i < len(text)-1 {
+				// If there are more characters,
+				// validate that they are digits
+				continue
+			}
+			return false
+		}
+	}
+	return text != ""
+}
+
+func validateTimestamp(timestamp string) bool {
+	stamp, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil {
+		return false
+	}
+
+	stampYear := time.Unix(stamp, 0).Year()
+	thisYear := time.Now().Year()
+
+	return stampYear >= thisYear-1 && stampYear <= thisYear+1
 }
 
 func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) error {
