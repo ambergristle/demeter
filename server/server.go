@@ -84,18 +84,18 @@ func parseReading(values *url.Values) (ReadingPayload, error) {
 	}
 
 	temperature := values.Get("temperature")
-	if !matchNumeric(humidity) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: humidity")
+	if !matchNumeric(temperature) {
+		return ReadingPayload{}, fmt.Errorf("Invalid parameter: temperature")
 	}
 
 	air_pressure := values.Get("air_pressure")
-	if !matchNumeric(humidity) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: humidity")
+	if !matchNumeric(air_pressure) {
+		return ReadingPayload{}, fmt.Errorf("Invalid parameter: air_pressure")
 	}
 
 	brightness := values.Get("brightness")
-	if !matchNumeric(humidity) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: humidity")
+	if !matchNumeric(brightness) {
+		return ReadingPayload{}, fmt.Errorf("Invalid parameter: brightness")
 	}
 
 	return ReadingPayload{
@@ -150,6 +150,8 @@ func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) er
 
 	// #region Construct Request
 	client := &http.Client{}
+
+	// todo: better reader?
 	req, err := http.NewRequest("POST", callbackUrl, strings.NewReader(bodyString))
 
 	req.Header.Add("content-type", "application/x-www-form-urlencoded")
@@ -162,11 +164,11 @@ func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) er
 	res, err := client.Do(req)
 
 	if err != nil {
-		return errors.New("Event dispatch failed")
+		return errors.New("Dispatch failed: " + err.Error())
 	}
 
 	if res.StatusCode != 200 {
-		return errors.New("Event dispatch failed")
+		return errors.New("Dispatch failed with status: " + res.Status)
 	}
 
 	return nil
