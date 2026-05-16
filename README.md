@@ -121,7 +121,11 @@ The callback request is secured with an [HMAC signature](https://en.wikipedia.or
 | `x-dmtr-timestamp` | Unix UTC timestamp |
 | `x-dmtr-signature` | HMAC signature (body + timestamp) |
 
-## Verify callback requests
+## Usage
+
+### Verify callback requests
+
+*This example is in Go, but you could use any language.*
 
 1. Validate request timestamp
 ```go
