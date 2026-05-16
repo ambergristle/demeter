@@ -37,8 +37,7 @@ void setup() {
 
     while (wifiStatus != WL_CONNECTED) {
         wifiStatus = WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-        int oneSecond = 1000;
-        delay(oneSecond * 5);
+        delay(1000 * 5);
     }
     Serial.println("Connected");
     // #endregion
@@ -47,15 +46,17 @@ void setup() {
 void loop() {
     Reading reading = Reading();
     takeReading(carrier, reading);
-    postReading(client, reading);    
+
+    int status = postReading(client, reading);
+    delay(1000 * 5);
 }
 
 int postReading(*HttpClient client, Reading reading) {
-    String body = "timestamp=" + reading.timestamp
-    body += "&temperature=" + ""
-    body += "&humidity=" + ""
-    body += "&air_pressure=" + ""
-    body += "&brightness=" + ""
+    String body = "timestamp=" + reading.timestamp;
+    body += "&temperature=" + String(reading.temperature);
+    body += "&humidity=" + String(reading.humidity);
+    body += "&air_pressure=" + String(reading.air_pressure);
+    body += "&brightness=" + String(reading.brightness);
 
     client.beginRequest();
     client.post("/readings/" + CLIENT_ID);
