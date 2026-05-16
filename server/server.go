@@ -157,8 +157,8 @@ func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) er
 	req.Header.Add("content-type", "application/x-www-form-urlencoded")
 	req.Header.Add("content-length", strconv.Itoa(len(bodyString)))
 
-	req.Header.Add("x-demeter-timestamp", timestamp)
-	req.Header.Add("x-demeter-signature", signature)
+	req.Header.Add("x-dmtr-timestamp", timestamp)
+	req.Header.Add("x-dmtr-signature", signature)
 	// #endregion
 
 	res, err := client.Do(req)
