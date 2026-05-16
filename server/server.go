@@ -110,7 +110,7 @@ func parseReading(values *url.Values) (ReadingPayload, error) {
 func matchNumeric(text string) bool {
 	for i, r := range text {
 		if r < '0' || r > '9' {
-			if r == '.' && i < len(text)-1 {
+			if r == '.' && i > 0 && i < len(text)-1 {
 				// If there are more characters,
 				// validate that they are digits
 				continue
