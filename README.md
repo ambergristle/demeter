@@ -37,7 +37,7 @@ While the device itself is capable of making an HTTP request directly to consume
 In light of its goals, Demeter's footprint will likely remain small, with additional functionality introduced through integrations.
 
 | Iteration | Introduces |
-| - | - | - |
+| - | - |
 | 0 | Service that validates Reading payload and makes signed call to registered webhook. |
 | 1 | Basic security and retry logic |
 | 2 | Queue or other overflow handler |
@@ -83,7 +83,7 @@ Values are read in from sensors using [Arduino lirbaries](https://docs.arduino.c
 
 | Property | Type | Unit | Range |
 | - | - | - | - |
-| timestamp | `int` | Unix? UTC? | - |
+| timestamp | `int` | Unix | - |
 | humidity | `float` | g/m<sup>3</sup> | 0-100% |
 | temperature | `float` | °C | 40-120°C |
 | air_pressure | `float` | kPa | absolute range 260-1260hPa |
@@ -170,4 +170,3 @@ if !hmac.Equal([]byte(signature), []byte(requestSignature)) {
     // Invalid signature: reject
 }
 ```
-
