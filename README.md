@@ -22,6 +22,8 @@ Demeter is focused on "garden" conditions, or specific diagnostics, though plot-
 | Soil Moisture | `number` | *relative* | % |
 
 There are a number of other inputs that could be collected and/or processed, namely:
+- Wind
+- Rain
 - pH
 - Nutrient levels
 - Image analysis (tracking color, growth, etc.)
@@ -58,9 +60,14 @@ In its simplest form, Demeter consists of:
 ### Device
 At a minimum, Demeter requries a board with the relevant environmental sensors and remote calling capabilities.
 
-The MVP is the prefabricated [Arduino Opla](https://store.arduino.cc/products/arduino-opla-iot-kit) board, which includes all sensors, and an SDK to read and post data over WiFi.
+The MVP is the prefabricated [Arduino Opla](https://opla.arduino.cc/) board, which includes all sensors, and an SDK to read and post data over WiFi.
 
 > *The board was on-hand, and does all the basics. This is not necessarily an endorsement of Arduino or the kit.*
+
+- [MKR WiFi 1010](https://docs.arduino.cc/hardware/mkr-wifi-1010/): WiFi + Bluetooth-capable microcontroller board
+- [HTS221](https://www.st.com/en/mems-and-sensors/hts221.html): Temperature and Humidity
+- [LPS22HB](https://www.st.com/en/mems-and-sensors/lps22hb.html): Air Pressure (and Temperature)
+- [APDS-9960](https://www.adafruit.com/product/3595): Light, proximity, and gesture sensing
 
 The board design can be optimized for cost and accessibility though, and subsequent iterations will attempt to address these issues.
 
@@ -71,6 +78,18 @@ This could just be a library that Arduino users can import and use manually, but
 
 - Read from sensors and call remote service.
 - Persist data locally short-term for retries?
+
+Values are read in from sensors using [Arduino lirbaries](https://docs.arduino.cc/tutorials/mkr-iot-carrier/mkr-iot-carrier-01-technical-reference/).
+
+| Property | Type | Unit | Range
+| - | - | - |
+| timestamp | `int` | Unix? UTC? | - |
+| humidity | `float` | g/m<sup>3</sup> | 0-100% |
+| temperature | `float` | °C | 40-120°C |
+| air_pressure | `float` | kPa | absolute range 260-1260hPa |
+| brightness | `int` | lx | - |
+
+*The only limits to brightness values appear to be memory-related. I haven't found a spec that clearly addresses this, but it seems capable of +50k lx (a sunny day).*
 
 ### Service
 *Relay readings to registered callback. And more?*
@@ -91,7 +110,7 @@ The Readings endpoint forwards valid reading data to a registered callback.
 | timestamp | `number` | Unix? UTC? |
 | humidity | `number` | g/m<sup>3</sup> |
 | temperature | `number` | C |
-| air_pressure | `number` | Pa |
+| air_pressure | `number` | kPa |
 | brightness | `number` | lx |
 
 The callback request is secured with an [HMAC signature](https://en.wikipedia.org/wiki/HMAC).
@@ -99,15 +118,15 @@ The callback request is secured with an [HMAC signature](https://en.wikipedia.or
 | Header | Value |
 | - | - |
 | `content-type` | `application/x-www-form-urlencoded` |
-| `x-demeter-timestamp` | Unix UTC timestamp |
-| `x-demeter-signature` | HMAC signature (body + timestamp) |
+| `x-dmtr-timestamp` | Unix UTC timestamp |
+| `x-dmtr-signature` | HMAC signature (body + timestamp) |
 
 ## Verify callback requests
 
 1. Validate request timestamp
 ```go
 // Get timestamp from Header, and parse to int
-requestTimestamp := r.Header.Get("x-demeter-timestamp")
+requestTimestamp := r.Header.Get("x-dmtr-timestamp")
 timestamp, err := strconv.ParseInt(requestTimestamp, 10, 64)
 // >> 1531420618
 if err != nil {
@@ -143,7 +162,7 @@ signature := "v0=" + hex.EncodeToString(mac.Sum(nil))
 
 4. Compare signatures
 ```go
-requestSignature := r.Header.Get("x-demeter-signature")
+requestSignature := r.Header.Get("x-dmtr-signature")
 // >> v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503
 
 // Compare signature bytes without leaking timing info
