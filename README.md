@@ -81,8 +81,8 @@ This could just be a library that Arduino users can import and use manually, but
 
 Values are read in from sensors using [Arduino lirbaries](https://docs.arduino.cc/tutorials/mkr-iot-carrier/mkr-iot-carrier-01-technical-reference/).
 
-| Property | Type | Unit | Range
-| - | - | - |
+| Property | Type | Unit | Range |
+| - | - | - | - |
 | timestamp | `int` | Unix? UTC? | - |
 | humidity | `float` | g/m<sup>3</sup> | 0-100% |
 | temperature | `float` | °C | 40-120°C |
@@ -170,3 +170,4 @@ if !hmac.Equal([]byte(signature), []byte(requestSignature)) {
     // Invalid signature: reject
 }
 ```
+
