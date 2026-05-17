@@ -58,13 +58,17 @@ func readingHandler(callbackUrl string, secret string) func(w http.ResponseWrite
 				return
 			}
 
-			err = dispatchEvent(callbackUrl, reading, []byte(secret))
-			if err != nil {
-				http.Error(w, "Internal server error: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
+			ch := make(chan error)
+			go func(r ReadingPayload) {
+				ch <- dispatchEvent(callbackUrl, r, []byte(secret))
+			}(reading)
 
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusAccepted)
+
+			cbErr := <-ch
+			if cbErr != nil {
+				fmt.Println("Callback failed repeatedly: " + cbErr.Error())
+			}
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return

@@ -54,7 +54,7 @@ func TestReadingRelay(t *testing.T) {
 				air_pressure: "15.94",
 				brightness:   "5380",
 			},
-			expected: 200,
+			expected: 202,
 		},
 		{
 			name:     "Bad Request",
@@ -117,7 +117,7 @@ func TestReadingRelay(t *testing.T) {
 				t.Errorf("Expected status %d, received %d", testCase.expected, resp.StatusCode)
 			}
 
-			if resp.StatusCode != 200 {
+			if resp.StatusCode != 202 {
 				return
 			}
 
