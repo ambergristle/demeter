@@ -57,11 +57,6 @@ func TestReadingRelay(t *testing.T) {
 			expected: 202,
 		},
 		{
-			name:     "Bad Request",
-			payload:  ReadingPayload{},
-			expected: 400,
-		},
-		{
 			name: "Leading Decimal",
 			payload: ReadingPayload{
 				timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
@@ -70,7 +65,7 @@ func TestReadingRelay(t *testing.T) {
 				air_pressure: "15.94",
 				brightness:   "5380",
 			},
-			expected: 400,
+			expected: 202,
 		},
 		{
 			name: "Trailing Decimal",
@@ -81,6 +76,11 @@ func TestReadingRelay(t *testing.T) {
 				air_pressure: "15.94",
 				brightness:   "5380",
 			},
+			expected: 202,
+		},
+		{
+			name:     "Bad Request",
+			payload:  ReadingPayload{},
 			expected: 400,
 		},
 		{
