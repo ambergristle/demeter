@@ -153,7 +153,9 @@ func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) er
 	signature := formatSignature(bodyString, timestamp, secret)
 
 	// #region Construct Request
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: time.Second * 3,
+	}
 
 	// todo: better reader?
 	req, err := http.NewRequest("POST", callbackUrl, strings.NewReader(bodyString))
@@ -166,13 +168,12 @@ func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) er
 	// #endregion
 
 	res, err := client.Do(req)
-
 	if err != nil {
-		return errors.New("Dispatch failed: " + err.Error())
+		return err
 	}
 
 	if res.StatusCode != 200 {
-		return errors.New("Dispatch failed with status: " + res.Status)
+		return errors.New("Callback failed with status: " + res.Status)
 	}
 
 	return nil
