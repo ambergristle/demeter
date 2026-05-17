@@ -134,32 +134,61 @@ func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) er
 	sig := formatSignature(bodyStr, sigTS, secret)
 
 	// #region Construct Request
+	// Should this be happening for each request?
 	client := &http.Client{
 		Timeout: time.Second * 3,
+		// Block redirects -- they're invalid
+		// CheckRedirect: ,
 	}
 
-	req, err := http.NewRequest("POST", callbackUrl, strings.NewReader(bodyStr))
+	var (
+		req *http.Request
+		res *http.Response
+		err error
+	)
+	tries := 0
+	for tries < 3 {
+		req, err = http.NewRequest("POST", callbackUrl, strings.NewReader(bodyStr))
+		if err != nil {
+			// Client or configuration error,
+			// Exit early
+			break
+		}
+
+		req.Header.Add("content-type", "application/x-www-form-urlencoded")
+		req.Header.Add("x-dmtr-timestamp", sigTS)
+		req.Header.Add("x-dmtr-signature", sig)
+		// #endregion
+
+		res, err = client.Do(req)
+		if err != nil {
+			// Client or configuration error,
+			// Exit early
+			break
+		}
+		defer res.Body.Close()
+		// Fail if body has length?
+
+		if res.StatusCode < 500 {
+			// Success, or non-recoverable error,
+			// Exit early
+			break
+		}
+
+		backoff := time.Duration(1 * (2 ^ tries))
+		time.Sleep(backoff)
+		tries += 1
+	}
+
 	if err != nil {
 		return err
 	}
 
-	req.Header.Add("content-type", "application/x-www-form-urlencoded")
-	req.Header.Add("x-dmtr-timestamp", sigTS)
-	req.Header.Add("x-dmtr-signature", sig)
-	// #endregion
-
-	res, err := client.Do(req)
-	if err != nil {
-		return err
+	if res.StatusCode == http.StatusOK {
+		return nil
 	}
 
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		return errors.New("Callback failed with status: " + res.Status)
-	}
-
-	return nil
+	return errors.New("Callback failed with status: " + res.Status)
 }
 
 func formatSignature(body string, ts string, secret []byte) string {
