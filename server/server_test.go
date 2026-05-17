@@ -11,6 +11,7 @@ import (
 )
 
 func TestReadingRelay(t *testing.T) {
+	// Pass through channel to guarantee availability
 	payload := make(chan ReadingPayload)
 
 	// #region Initialize Test Callback Server

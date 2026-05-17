@@ -14,26 +14,6 @@ import (
 	"time"
 )
 
-func server(options *DemeterOptions) {
-	if len(options.callbackUrl) == 0 {
-		log.Fatalf("Callback URL must be configured")
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/readings/{sensorId}", readingHandler(options.callbackUrl, options.secret))
-
-	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", options.port),
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 2 * time.Second,
-		// IdleTimeout:  120 * time.Second,
-		Handler: http.MaxBytesHandler(mux, 500),
-	}
-
-	log.Printf("Server listening on %s\n", srv.Addr)
-	log.Fatal(srv.ListenAndServe())
-}
-
 func readingHandler(callbackUrl string, secret []byte) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -64,7 +44,6 @@ func readingHandler(callbackUrl string, secret []byte) func(w http.ResponseWrite
 			}(reading)
 
 			w.WriteHeader(http.StatusAccepted)
-
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return

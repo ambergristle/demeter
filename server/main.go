@@ -2,7 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
+	"time"
 )
 
 func main() {
@@ -25,9 +28,17 @@ func main() {
 		log.Fatalf("missing required flag: -s")
 	}
 
-	server(&DemeterOptions{
-		callbackUrl: callbackUrl,
-		port:        port,
-		secret:      []byte(secret),
-	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/readings/{sensorId}", readingHandler(callbackUrl, []byte(secret)))
+
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
+		// IdleTimeout:  120 * time.Second,
+		Handler: http.MaxBytesHandler(mux, 500),
+	}
+
+	log.Printf("Server listening on %s\n", srv.Addr)
+	log.Fatal(srv.ListenAndServe())
 }
