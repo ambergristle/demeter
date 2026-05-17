@@ -11,7 +11,8 @@ import (
 )
 
 func TestReadingRelay(t *testing.T) {
-	var payload ReadingPayload
+	payload := make(chan ReadingPayload)
+
 	// #region Initialize Test Callback Server
 	cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		err := r.ParseForm()
@@ -21,7 +22,7 @@ func TestReadingRelay(t *testing.T) {
 		}
 
 		values := r.Form
-		payload = ReadingPayload{
+		payload <- ReadingPayload{
 			timestamp:    values.Get("timestamp"),
 			temperature:  values.Get("temperature"),
 			humidity:     values.Get("humidity"),
@@ -122,19 +123,20 @@ func TestReadingRelay(t *testing.T) {
 			}
 
 			// #region Ensure payload is relayed faithfully
-			if payload.timestamp != testCase.payload.timestamp {
+			relayed := <-payload
+			if relayed.timestamp != testCase.payload.timestamp {
 				t.Errorf("Unexpected humidity value")
 			}
-			if payload.humidity != testCase.payload.humidity {
+			if relayed.humidity != testCase.payload.humidity {
 				t.Errorf("Unexpected humidity value")
 			}
-			if payload.temperature != testCase.payload.temperature {
+			if relayed.temperature != testCase.payload.temperature {
 				t.Errorf("Unexpected temperature value")
 			}
-			if payload.air_pressure != testCase.payload.air_pressure {
+			if relayed.air_pressure != testCase.payload.air_pressure {
 				t.Errorf("Unexpected air_pressure value")
 			}
-			if payload.brightness != testCase.payload.brightness {
+			if relayed.brightness != testCase.payload.brightness {
 				t.Errorf("Unexpected brightness value")
 			}
 			// #endregion
