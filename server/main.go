@@ -18,11 +18,11 @@ func main() {
 	flag.Parse()
 
 	if len(callbackUrl) == 0 {
-		log.Fatalf("No callback URL configured")
+		log.Fatalf("missing required flag: -cb")
 	}
 
 	if len(secret) == 0 {
-		log.Fatalf("No signing secret configured")
+		log.Fatalf("missing required flag: -s")
 	}
 
 	server(&DemeterOptions{
