@@ -27,11 +27,11 @@ func server(options *DemeterOptions) {
 		ReadTimeout:  2 * time.Second,
 		WriteTimeout: 2 * time.Second,
 		// IdleTimeout:  120 * time.Second,
+		Handler: http.MaxBytesHandler(mux, 500),
 	}
 
 	log.Printf("Server listening on %s\n", srv.Addr)
-	err := srv.ListenAndServe()
-	log.Fatal(err)
+	log.Fatal(srv.ListenAndServe())
 }
 
 func readingHandler(callbackUrl string, secret []byte) func(w http.ResponseWriter, r *http.Request) {
@@ -57,16 +57,14 @@ func readingHandler(callbackUrl string, secret []byte) func(w http.ResponseWrite
 				return
 			}
 
-			ch := make(chan error)
 			go func(r ReadingPayload) {
-				ch <- dispatchEvent(callbackUrl, r, secret)
+				if err := dispatchEvent(callbackUrl, r, secret); err != nil {
+					log.Printf("Callback failed repeatedly: %v ", err)
+				}
 			}(reading)
 
 			w.WriteHeader(http.StatusAccepted)
 
-			if cbErr := <-ch; cbErr != nil {
-				log.Print("Callback failed repeatedly: " + cbErr.Error())
-			}
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -121,7 +119,7 @@ func isIntStr(s string) bool {
 	if s == "" {
 		return false
 	}
-	_, err := strconv.ParseInt(s, 10, 16)
+	_, err := strconv.ParseInt(s, 10, 32)
 	return err == nil
 }
 
