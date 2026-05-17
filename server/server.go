@@ -16,36 +16,35 @@ import (
 
 func server(options *DemeterOptions) {
 	if len(options.callbackUrl) == 0 {
-		panic("Callback URL must be configured")
+		log.Fatalf("Callback URL must be configured")
 	}
-
-	port := strconv.Itoa(options.port)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/readings/{sensorId}", readingHandler(options.callbackUrl, options.secret))
 
-	fmt.Printf("Server is running at http://localhost:%s\n", port)
-	err := http.ListenAndServe(":"+port, mux)
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", options.port),
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
+		// IdleTimeout:  120 * time.Second,
+	}
 
+	log.Printf("Server listening on %s\n", srv.Addr)
+	err := srv.ListenAndServe()
 	log.Fatal(err)
 }
 
-func readingHandler(callbackUrl string, secret string) func(w http.ResponseWriter, r *http.Request) {
+func readingHandler(callbackUrl string, secret []byte) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
 			sensorId := r.PathValue("sensorId")
-			if len(sensorId) < 1 {
-				http.Error(
-					w,
-					"Bad request: Path must include `sensorId`: `/readings/{sensorId}`",
-					http.StatusBadRequest,
-				)
+			if sensorId == "" {
+				http.Error(w, "Path must include sensorId", http.StatusBadRequest)
 				return
 			}
 
-			err := r.ParseForm()
-			if err != nil {
+			if err := r.ParseForm(); err != nil {
 				http.Error(w, "Bad request", http.StatusBadRequest)
 				return
 			}
@@ -60,14 +59,13 @@ func readingHandler(callbackUrl string, secret string) func(w http.ResponseWrite
 
 			ch := make(chan error)
 			go func(r ReadingPayload) {
-				ch <- dispatchEvent(callbackUrl, r, []byte(secret))
+				ch <- dispatchEvent(callbackUrl, r, secret)
 			}(reading)
 
 			w.WriteHeader(http.StatusAccepted)
 
-			cbErr := <-ch
-			if cbErr != nil {
-				fmt.Println("Callback failed repeatedly: " + cbErr.Error())
+			if cbErr := <-ch; cbErr != nil {
+				log.Print("Callback failed repeatedly: " + cbErr.Error())
 			}
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -77,94 +75,100 @@ func readingHandler(callbackUrl string, secret string) func(w http.ResponseWrite
 }
 
 func parseReading(values *url.Values) (ReadingPayload, error) {
-	timestamp := values.Get("timestamp")
-	if !validateTimestamp(timestamp) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: timestamp")
+	ts := values.Get("timestamp")
+	if !validateTimestamp(ts) {
+		return ReadingPayload{}, errors.New("Invalid parameter: timestamp")
 	}
 
-	humidity := values.Get("humidity")
-	if !matchNumeric(humidity) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: humidity")
+	hum := values.Get("humidity")
+	if !isFloatStr(hum) {
+		return ReadingPayload{}, errors.New("Invalid parameter: humidity")
 	}
 
-	temperature := values.Get("temperature")
-	if !matchNumeric(temperature) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: temperature")
+	temp := values.Get("temperature")
+	if !isFloatStr(temp) {
+		return ReadingPayload{}, errors.New("Invalid parameter: temperature")
 	}
 
-	air_pressure := values.Get("air_pressure")
-	if !matchNumeric(air_pressure) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: air_pressure")
+	air := values.Get("air_pressure")
+	if !isFloatStr(air) {
+		return ReadingPayload{}, errors.New("Invalid parameter: air_pressure")
 	}
 
-	brightness := values.Get("brightness")
-	if !matchNumeric(brightness) {
-		return ReadingPayload{}, fmt.Errorf("Invalid parameter: brightness")
+	bri := values.Get("brightness")
+	if !isIntStr(bri) {
+		return ReadingPayload{}, errors.New("Invalid parameter: brightness")
 	}
 
 	return ReadingPayload{
-		timestamp:    timestamp,
-		temperature:  temperature,
-		humidity:     humidity,
-		air_pressure: air_pressure,
-		brightness:   brightness,
+		timestamp:    ts,
+		temperature:  temp,
+		humidity:     hum,
+		air_pressure: air,
+		brightness:   bri,
 	}, nil
 }
 
-func matchNumeric(text string) bool {
-	for i, r := range text {
-		if r < '0' || r > '9' {
-			if r == '.' && i > 0 && i < len(text)-1 {
-				// If there are more characters,
-				// validate that they are digits
-				continue
-			}
-			return false
-		}
+func isFloatStr(s string) bool {
+	if s == "" {
+		return false
 	}
-	return text != ""
+	_, err := strconv.ParseFloat(s, 64)
+	return err == nil
+}
+
+func isIntStr(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := strconv.ParseInt(s, 10, 16)
+	return err == nil
 }
 
 func validateTimestamp(timestamp string) bool {
-	stamp, err := strconv.ParseInt(timestamp, 10, 64)
+	tsInt, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
 		return false
 	}
+	now := time.Now().Unix()
+	return abs(now-tsInt) <= 5*60
+}
 
-	stampYear := time.Unix(stamp, 0).Year()
-	thisYear := time.Now().Year()
-
-	return stampYear >= thisYear-1 && stampYear <= thisYear+1
+func abs(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) error {
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	sigTS := strconv.FormatInt(time.Now().Unix(), 10)
 
-	// Initialize body first to generate signature
-	body := url.Values{
+	// Initialize bodyVals first to generate signature
+	bodyVals := url.Values{
 		"timestamp":    {payload.timestamp},
 		"humidity":     {payload.humidity},
 		"temperature":  {payload.temperature},
 		"air_pressure": {payload.air_pressure},
 		"brightness":   {payload.brightness},
 	}
+	bodyStr := bodyVals.Encode()
 
-	bodyString := body.Encode()
-	signature := formatSignature(bodyString, timestamp, secret)
+	sig := formatSignature(bodyStr, sigTS, secret)
 
 	// #region Construct Request
 	client := &http.Client{
 		Timeout: time.Second * 3,
 	}
 
-	// todo: better reader?
-	req, err := http.NewRequest("POST", callbackUrl, strings.NewReader(bodyString))
+	req, err := http.NewRequest("POST", callbackUrl, strings.NewReader(bodyStr))
+	if err != nil {
+		return err
+	}
 
 	req.Header.Add("content-type", "application/x-www-form-urlencoded")
-	req.Header.Add("content-length", strconv.Itoa(len(bodyString)))
-
-	req.Header.Add("x-dmtr-timestamp", timestamp)
-	req.Header.Add("x-dmtr-signature", signature)
+	req.Header.Add("x-dmtr-timestamp", sigTS)
+	req.Header.Add("x-dmtr-signature", sig)
 	// #endregion
 
 	res, err := client.Do(req)
@@ -172,32 +176,32 @@ func dispatchEvent(callbackUrl string, payload ReadingPayload, secret []byte) er
 		return err
 	}
 
-	if res.StatusCode != 200 {
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
 		return errors.New("Callback failed with status: " + res.Status)
 	}
 
 	return nil
 }
 
-func formatSignature(body string, timestamp string, secret []byte) string {
-	signatureBase := "v0:" + timestamp + ":" + body
+func formatSignature(body string, ts string, secret []byte) string {
+	signatureBase := fmt.Sprintf("v0:%s:%s", ts, body)
 
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(signatureBase))
 
-	signature := "v0=" + hex.EncodeToString(mac.Sum(nil))
-	return signature
+	return fmt.Sprintf("v0=%s", hex.EncodeToString(mac.Sum(nil)))
 }
 
 type DemeterOptions struct {
 	callbackUrl string
 	port        int
-	secret      string
+	secret      []byte
 }
 
 type ReadingPayload struct {
-	timestamp string
-	// Data
+	timestamp    string
 	humidity     string
 	temperature  string
 	air_pressure string

@@ -37,7 +37,7 @@ func TestReadingRelay(t *testing.T) {
 	// #region Initialize Test Server
 	// Use Mux to extract path param
 	mux := http.NewServeMux()
-	mux.HandleFunc("/readings/{sensorId}", readingHandler(cbServer.URL, "TEST_SECRET"))
+	mux.HandleFunc("/readings/{sensorId}", readingHandler(cbServer.URL, []byte("TEST_SECRET")))
 	// #endregion
 
 	testCases := []struct {
