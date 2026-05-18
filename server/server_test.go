@@ -39,7 +39,7 @@ func TestReadingRelay(t *testing.T) {
 	// #region Initialize Test Server
 	// Use Mux to extract path param
 	mux := http.NewServeMux()
-	mux.HandleFunc("/readings/{sensorId}", readingHandler(cbServer.URL, []byte("TEST_SECRET")))
+	mux.HandleFunc("/readings/{sensorId}", readingHandler(cbServer.URL))
 	// #endregion
 
 	testCases := []struct {
@@ -171,7 +171,7 @@ func TestRetry(t *testing.T) {
 		brightness:   "5380",
 	}
 
-	err := dispatchEvent(cbServer.URL, pay, []byte("TEST_SECRET"))
+	err := postCallback(cbServer.URL, pay)
 	if err != nil {
 		t.Errorf("Unexpected error: %+v", err)
 	}
