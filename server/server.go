@@ -40,7 +40,7 @@ func readingHandler(callbackUrl string) func(w http.ResponseWriter, r *http.Requ
 
 			go func(r ReadingPayload) {
 				if err := postCallback(callbackUrl, r); err != nil {
-					log.Printf("Callback failed repeatedly: %v ", err)
+					log.Printf("Callback failed repeatedly: %v", err)
 				}
 			}(reading)
 
@@ -130,7 +130,7 @@ func postCallback(cbUrl string, payload ReadingPayload) error {
 	}
 	bodyStr := bodyVals.Encode()
 
-	sig := formatSignature(bodyStr)
+	sig := generateSignature(bodyStr)
 
 	// #region Construct Request
 	// Should this be happening for each request?
@@ -198,13 +198,16 @@ type ReadingPayload struct {
 	brightness   string
 }
 
-func formatSignature(body string) HmacSignature {
+// generateSignature creates an HMAC signature and timestamp.
+//
+// Body is expected to be a form-url-encoded string.
+func generateSignature(body string) HmacSignature {
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
 	sigBase := fmt.Sprintf("v0:%s:%s", ts, body)
 
 	secret := []byte(os.Getenv("SIGNING_SECRET"))
-	// This only clears the bytes;
-	// The string allocated for `Getenv` is inaccessible
+	// This only clears the bytes, not heap string for `Getenv`.
+	// Strings in go are immutable, can't be cleared.
 	defer func() { clear(secret) }()
 
 	mac := hmac.New(sha256.New, secret)

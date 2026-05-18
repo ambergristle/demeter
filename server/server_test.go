@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 )
 
 func TestReadingRelay(t *testing.T) {
+	os.Setenv("SIGNING_SECRET", "TEST_SECRET")
 	// Pass through channel to guarantee availability
 	payload := make(chan ReadingPayload)
 
@@ -148,6 +150,7 @@ func TestReadingRelay(t *testing.T) {
 }
 
 func TestRetry(t *testing.T) {
+	os.Setenv("SIGNING_SECRET", "TEST_SECRET")
 	// #region Initialize Test Callback Server
 	errs := 0
 
