@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,20 +21,20 @@ func TestReadingRelay(t *testing.T) {
 
 	// #region Initialize Test Callback Server
 	cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		err := r.ParseForm()
+		decoder := json.NewDecoder(r.Body)
+
+		var reading ReadingPayload
+		err := decoder.Decode(&reading)
 		if err != nil {
 			http.Error(w, "Bad request: "+err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		values := r.Form
-		payload <- ReadingPayload{
-			timestamp:    values.Get("timestamp"),
-			temperature:  values.Get("temperature"),
-			humidity:     values.Get("humidity"),
-			air_pressure: values.Get("air_pressure"),
-			brightness:   values.Get("brightness"),
-		}
+		io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+
+		payload <- reading
+		log.Printf("reading: %+v\n", reading)
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -40,8 +43,11 @@ func TestReadingRelay(t *testing.T) {
 
 	// #region Initialize Test Server
 	// Use Mux to extract path param
+	client := &http.Client{
+		Timeout: time.Second * 3,
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/readings/{sensorId}", readingHandler(cbServer.URL))
+	mux.HandleFunc("/readings/{sensorId}", readingHandler(client, cbServer.URL))
 	// #endregion
 
 	testCases := []struct {
@@ -52,33 +58,33 @@ func TestReadingRelay(t *testing.T) {
 		{
 			name: "Happy Path",
 			payload: ReadingPayload{
-				timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
-				humidity:     "65.25",
-				temperature:  "27.01",
-				air_pressure: "15.94",
-				brightness:   "5380",
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "65.25",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "5380",
 			},
 			expected: 202,
 		},
 		{
 			name: "Leading Decimal",
 			payload: ReadingPayload{
-				timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
-				humidity:     ".65",
-				temperature:  "27.01",
-				air_pressure: "15.94",
-				brightness:   "5380",
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    ".65",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "5380",
 			},
 			expected: 202,
 		},
 		{
 			name: "Trailing Decimal",
 			payload: ReadingPayload{
-				timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
-				humidity:     "65.",
-				temperature:  "27.01",
-				air_pressure: "15.94",
-				brightness:   "5380",
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "65.",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "5380",
 			},
 			expected: 202,
 		},
@@ -90,11 +96,11 @@ func TestReadingRelay(t *testing.T) {
 		{
 			name: "Not A Number",
 			payload: ReadingPayload{
-				timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
-				humidity:     "wet",
-				temperature:  "27.01",
-				air_pressure: "15.94",
-				brightness:   "5380",
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "wet",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "5380",
 			},
 			expected: 400,
 		},
@@ -103,11 +109,11 @@ func TestReadingRelay(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			body := strings.NewReader(url.Values{
-				"timestamp":    {testCase.payload.timestamp},
-				"humidity":     {testCase.payload.humidity},
-				"temperature":  {testCase.payload.temperature},
-				"air_pressure": {testCase.payload.air_pressure},
-				"brightness":   {testCase.payload.brightness},
+				"timestamp":    {testCase.payload.Timestamp},
+				"humidity":     {testCase.payload.Humidity},
+				"temperature":  {testCase.payload.Temperature},
+				"air_pressure": {testCase.payload.AirPressure},
+				"brightness":   {testCase.payload.Brightness},
 			}.Encode())
 
 			req := httptest.NewRequest("POST", "/readings/TEST_ID", body)
@@ -127,19 +133,20 @@ func TestReadingRelay(t *testing.T) {
 
 			// #region Ensure payload is relayed faithfully
 			relayed := <-payload
-			if relayed.timestamp != testCase.payload.timestamp {
+			log.Printf("relayed: %+v\n", relayed)
+			if relayed.Timestamp != testCase.payload.Timestamp {
 				t.Errorf("Unexpected humidity value")
 			}
-			if relayed.humidity != testCase.payload.humidity {
+			if relayed.Humidity != testCase.payload.Humidity {
 				t.Errorf("Unexpected humidity value")
 			}
-			if relayed.temperature != testCase.payload.temperature {
+			if relayed.Temperature != testCase.payload.Temperature {
 				t.Errorf("Unexpected temperature value")
 			}
-			if relayed.air_pressure != testCase.payload.air_pressure {
+			if relayed.AirPressure != testCase.payload.AirPressure {
 				t.Errorf("Unexpected air_pressure value")
 			}
-			if relayed.brightness != testCase.payload.brightness {
+			if relayed.Brightness != testCase.payload.Brightness {
 				t.Errorf("Unexpected brightness value")
 			}
 			// #endregion
@@ -167,14 +174,17 @@ func TestRetry(t *testing.T) {
 	// #endregion
 
 	pay := ReadingPayload{
-		timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
-		humidity:     "65.",
-		temperature:  "27.01",
-		air_pressure: "15.94",
-		brightness:   "5380",
+		Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+		Humidity:    "65.",
+		Temperature: "27.01",
+		AirPressure: "15.94",
+		Brightness:  "5380",
 	}
 
-	err := postCallback(cbServer.URL, pay)
+	client := &http.Client{
+		Timeout: time.Second * 3,
+	}
+	err := postCallback(client, cbServer.URL, pay)
 	if err != nil {
 		t.Errorf("Unexpected error: %+v", err)
 	}

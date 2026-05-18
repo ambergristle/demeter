@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,11 +13,10 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
-func readingHandler(callbackUrl string) func(w http.ResponseWriter, r *http.Request) {
+func readingHandler(client *http.Client, callbackUrl string) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "POST":
@@ -39,7 +40,7 @@ func readingHandler(callbackUrl string) func(w http.ResponseWriter, r *http.Requ
 			}
 
 			go func(r ReadingPayload) {
-				if err := postCallback(callbackUrl, r); err != nil {
+				if err := postCallback(client, callbackUrl, r); err != nil {
 					log.Printf("Callback failed repeatedly: %v", err)
 				}
 			}(reading)
@@ -79,11 +80,11 @@ func parseReading(values *url.Values) (ReadingPayload, error) {
 	}
 
 	return ReadingPayload{
-		timestamp:    ts,
-		temperature:  temp,
-		humidity:     hum,
-		air_pressure: air,
-		brightness:   bri,
+		Timestamp:   ts,
+		Temperature: temp,
+		Humidity:    hum,
+		AirPressure: air,
+		Brightness:  bri,
 	}, nil
 }
 
@@ -119,42 +120,36 @@ func abs(x int64) int64 {
 	return x
 }
 
-func postCallback(cbUrl string, payload ReadingPayload) error {
-	// Initialize bodyVals first to generate signature
-	bodyVals := url.Values{
-		"timestamp":    {payload.timestamp},
-		"humidity":     {payload.humidity},
-		"temperature":  {payload.temperature},
-		"air_pressure": {payload.air_pressure},
-		"brightness":   {payload.brightness},
-	}
-	bodyStr := bodyVals.Encode()
+func postCallback(
+	client *http.Client,
+	cbUrl string,
+	payload ReadingPayload,
+) error {
+	var (
+		err  error
+		resp *http.Response
+	)
 
-	sig := generateSignature(bodyStr)
+	// Create json first to generate signature
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	sig := generateSignature(string(bodyBytes))
 
 	// #region Construct Request
-	// Should this be happening for each request?
-	client := &http.Client{
-		Timeout: time.Second * 3,
-		// Block redirects -- they're invalid
-		// CheckRedirect: ,
-	}
-
-	var (
-		req  *http.Request
-		resp *http.Response
-		err  error
-	)
 	tries := 0
 	for tries < 3 {
-		req, err = http.NewRequest("POST", cbUrl, strings.NewReader(bodyStr))
+		var req *http.Request
+		req, err = http.NewRequest("POST", cbUrl, bytes.NewBuffer(bodyBytes))
 		if err != nil {
 			// Client or configuration error,
 			// Exit early
 			break
 		}
 
-		req.Header.Add("content-type", "application/x-www-form-urlencoded")
+		req.Header.Add("content-type", "application/json")
 		req.Header.Add("x-dmtr-timestamp", sig.timestamp)
 		req.Header.Add("x-dmtr-signature", sig.signature)
 		// #endregion
@@ -191,11 +186,11 @@ func postCallback(cbUrl string, payload ReadingPayload) error {
 }
 
 type ReadingPayload struct {
-	timestamp    string
-	humidity     string
-	temperature  string
-	air_pressure string
-	brightness   string
+	Timestamp   string `json:"timestamp"`
+	Humidity    string `json:"humidity"`
+	Temperature string `json:"temperature"`
+	AirPressure string `json:"air_pressure"`
+	Brightness  string `json:"brightness"`
 }
 
 // generateSignature creates an HMAC signature and timestamp.

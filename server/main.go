@@ -16,8 +16,14 @@ func main() {
 		log.Fatalln(err)
 	}
 
+	client := &http.Client{
+		Timeout: time.Second * 3,
+		// Block redirects -- they're invalid
+		// CheckRedirect: ,
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/readings/{sensorId}", readingHandler(env.callbackUrl))
+	mux.HandleFunc("/readings/{sensorId}", readingHandler(client, env.callbackUrl))
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", env.port),
