@@ -11,7 +11,9 @@ import (
 )
 
 func TestReadingRelay(t *testing.T) {
-	var payload ReadingPayload
+	// Pass through channel to guarantee availability
+	payload := make(chan ReadingPayload)
+
 	// #region Initialize Test Callback Server
 	cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		err := r.ParseForm()
@@ -21,7 +23,7 @@ func TestReadingRelay(t *testing.T) {
 		}
 
 		values := r.Form
-		payload = ReadingPayload{
+		payload <- ReadingPayload{
 			timestamp:    values.Get("timestamp"),
 			temperature:  values.Get("temperature"),
 			humidity:     values.Get("humidity"),
@@ -37,7 +39,7 @@ func TestReadingRelay(t *testing.T) {
 	// #region Initialize Test Server
 	// Use Mux to extract path param
 	mux := http.NewServeMux()
-	mux.HandleFunc("/readings/{sensorId}", readingHandler(cbServer.URL, "TEST_SECRET"))
+	mux.HandleFunc("/readings/{sensorId}", readingHandler(cbServer.URL, []byte("TEST_SECRET")))
 	// #endregion
 
 	testCases := []struct {
@@ -54,12 +56,7 @@ func TestReadingRelay(t *testing.T) {
 				air_pressure: "15.94",
 				brightness:   "5380",
 			},
-			expected: 200,
-		},
-		{
-			name:     "Bad Request",
-			payload:  ReadingPayload{},
-			expected: 400,
+			expected: 202,
 		},
 		{
 			name: "Leading Decimal",
@@ -70,7 +67,7 @@ func TestReadingRelay(t *testing.T) {
 				air_pressure: "15.94",
 				brightness:   "5380",
 			},
-			expected: 400,
+			expected: 202,
 		},
 		{
 			name: "Trailing Decimal",
@@ -81,6 +78,11 @@ func TestReadingRelay(t *testing.T) {
 				air_pressure: "15.94",
 				brightness:   "5380",
 			},
+			expected: 202,
+		},
+		{
+			name:     "Bad Request",
+			payload:  ReadingPayload{},
 			expected: 400,
 		},
 		{
@@ -117,24 +119,25 @@ func TestReadingRelay(t *testing.T) {
 				t.Errorf("Expected status %d, received %d", testCase.expected, resp.StatusCode)
 			}
 
-			if resp.StatusCode != 200 {
+			if resp.StatusCode != 202 {
 				return
 			}
 
 			// #region Ensure payload is relayed faithfully
-			if payload.timestamp != testCase.payload.timestamp {
+			relayed := <-payload
+			if relayed.timestamp != testCase.payload.timestamp {
 				t.Errorf("Unexpected humidity value")
 			}
-			if payload.humidity != testCase.payload.humidity {
+			if relayed.humidity != testCase.payload.humidity {
 				t.Errorf("Unexpected humidity value")
 			}
-			if payload.temperature != testCase.payload.temperature {
+			if relayed.temperature != testCase.payload.temperature {
 				t.Errorf("Unexpected temperature value")
 			}
-			if payload.air_pressure != testCase.payload.air_pressure {
+			if relayed.air_pressure != testCase.payload.air_pressure {
 				t.Errorf("Unexpected air_pressure value")
 			}
-			if payload.brightness != testCase.payload.brightness {
+			if relayed.brightness != testCase.payload.brightness {
 				t.Errorf("Unexpected brightness value")
 			}
 			// #endregion
@@ -142,4 +145,38 @@ func TestReadingRelay(t *testing.T) {
 
 	}
 
+}
+
+func TestRetry(t *testing.T) {
+	// #region Initialize Test Callback Server
+	errs := 0
+
+	cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if errs < 2 {
+			errs += 1
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer cbServer.Close()
+	// #endregion
+
+	pay := ReadingPayload{
+		timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
+		humidity:     "65.",
+		temperature:  "27.01",
+		air_pressure: "15.94",
+		brightness:   "5380",
+	}
+
+	err := dispatchEvent(cbServer.URL, pay, []byte("TEST_SECRET"))
+	if err != nil {
+		t.Errorf("Unexpected error: %+v", err)
+	}
+
+	if errs != 2 {
+		t.Errorf("Expected 3 retries")
+	}
 }
