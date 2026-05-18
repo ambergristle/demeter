@@ -146,3 +146,37 @@ func TestReadingRelay(t *testing.T) {
 	}
 
 }
+
+func TestRetry(t *testing.T) {
+	// #region Initialize Test Callback Server
+	errs := 0
+
+	cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if errs < 2 {
+			errs += 1
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer cbServer.Close()
+	// #endregion
+
+	pay := ReadingPayload{
+		timestamp:    strconv.FormatInt(time.Now().Unix(), 10),
+		humidity:     "65.",
+		temperature:  "27.01",
+		air_pressure: "15.94",
+		brightness:   "5380",
+	}
+
+	err := dispatchEvent(cbServer.URL, pay, []byte("TEST_SECRET"))
+	if err != nil {
+		t.Errorf("Unexpected error: %+v", err)
+	}
+
+	if errs != 2 {
+		t.Errorf("Expected 3 retries")
+	}
+}
