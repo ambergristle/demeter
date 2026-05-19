@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,6 +90,17 @@ func parseReading(values *url.Values) (ReadingPayload, error) {
 	}, nil
 }
 
+// Include unique ID in client call? Or assign here?
+type ReadingPayload struct {
+	Timestamp   string `json:"timestamp"`
+	Humidity    string `json:"humidity"`
+	Temperature string `json:"temperature"`
+	AirPressure string `json:"air_pressure"`
+	Brightness  string `json:"brightness"`
+}
+
+// #region Validation
+
 func isFloatStr(s string) bool {
 	if s == "" {
 		return false
@@ -120,55 +133,72 @@ func abs(x int64) int64 {
 	return x
 }
 
+// #endregion
+
 func postCallback(
 	client *http.Client,
 	cbUrl string,
 	payload ReadingPayload,
 ) error {
 	var (
+		// Unique ID for each reading event
+		eid  string = generateUniqueID()
 		err  error
 		resp *http.Response
 	)
 
 	// Create json first to generate signature
-	bodyBytes, err := json.Marshal(payload)
+	bodyBytes, err := json.Marshal(
+		Payload{
+			Type:      "reading",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Data:      payload,
+		},
+	)
 	if err != nil {
 		return err
 	}
+	// Create once for any/all attempts
+	bodyBuff := bytes.NewBuffer(bodyBytes)
+	bodyStr := string(bodyBytes)
 
-	sig := generateSignature(string(bodyBytes))
-
-	// #region Construct Request
+	// Allow up to 3 retries, for >= 500
 	tries := 0
 	for tries < 3 {
+		// #region Construct Request
 		var req *http.Request
-		req, err = http.NewRequest("POST", cbUrl, bytes.NewBuffer(bodyBytes))
+		req, err = http.NewRequest("POST", cbUrl, bodyBuff)
 		if err != nil {
 			// Client or configuration error,
 			// Exit early
 			break
 		}
 
+		// Unique timestamp, signature for each attempt
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		sig := generateSignature(eid, ts, bodyStr)
+
 		req.Header.Add("content-type", "application/json")
-		req.Header.Add("x-dmtr-timestamp", sig.timestamp)
-		req.Header.Add("x-dmtr-signature", sig.signature)
+		// Standard Webhooks signature headers
+		req.Header.Add("webhook-id", eid)
+		req.Header.Add("webhook-timestamp", ts)
+		req.Header.Add("webhook-signature", sig)
 		// #endregion
 
 		resp, err = client.Do(req)
 		if err != nil {
-			// Client or configuration error,
-			// Exit early
+			// Client or configuration error
 			break
 		}
 		defer resp.Body.Close()
 		// Fail if body has length?
 
 		if resp.StatusCode < 500 {
-			// Success, or non-recoverable error,
-			// Exit early
+			// Success, or non-recoverable error
 			break
 		}
 
+		// Give the servr some space
 		backoff := time.Duration(1 * (2 ^ tries))
 		time.Sleep(backoff)
 		tries += 1
@@ -182,23 +212,29 @@ func postCallback(
 		return nil
 	}
 
+	if resp.StatusCode == http.StatusGone {
+		// Unsubscribe
+	}
+
 	return errors.New("Callback failed with status: " + resp.Status)
 }
 
-type ReadingPayload struct {
-	Timestamp   string `json:"timestamp"`
-	Humidity    string `json:"humidity"`
-	Temperature string `json:"temperature"`
-	AirPressure string `json:"air_pressure"`
-	Brightness  string `json:"brightness"`
+type Payload struct {
+	Type      string         `json:"type"`
+	Timestamp string         `json:"timestamp"` // ISO 8601
+	Data      ReadingPayload `json:"data"`
 }
 
 // generateSignature creates an HMAC signature and timestamp.
 //
-// Body is expected to be a form-url-encoded string.
-func generateSignature(body string) HmacSignature {
-	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	sigBase := fmt.Sprintf("v0:%s:%s", ts, body)
+// eid is an event ID unique to each reading relay.
+//
+// ts is the Unix timestamp for the POST attempt.
+//
+// body is idiomatically JSON string, but could be
+// form-url-encoded as long as client and server agree.
+func generateSignature(eid string, ts string, body string) string {
+	sigBase := fmt.Sprintf("%s.%s.%s", eid, ts, body)
 
 	secret := []byte(os.Getenv("SIGNING_SECRET"))
 	// This only clears the bytes, not heap string for `Getenv`.
@@ -206,16 +242,26 @@ func generateSignature(body string) HmacSignature {
 	defer func() { clear(secret) }()
 
 	mac := hmac.New(sha256.New, secret)
-
 	mac.Write([]byte(sigBase))
 
-	return HmacSignature{
-		signature: fmt.Sprintf("v0=%s", hex.EncodeToString(mac.Sum(nil))),
-		timestamp: ts,
-	}
+	return fmt.Sprintf("v1,%s", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
 }
 
-type HmacSignature struct {
-	signature string
-	timestamp string
+func generateUniqueID() string {
+	// Use length divisible by 3
+	// to avoid padding
+	buff := make([]byte, 18)
+	ts := time.Now().Unix()
+	// Put the timestamp in the first 4 bytes
+	binary.LittleEndian.PutUint32(buff, uint32(ts))
+	// Read random data into the rest
+	rand.Read(buff[3:])
+
+	return base64.StdEncoding.EncodeToString(buff)
+}
+
+func generateSecret() string {
+	b := make([]byte, 64)
+	rand.Read(b)
+	return "whsec_" + base64.StdEncoding.EncodeToString(b)
 }
