@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,13 +16,13 @@ import (
 func TestReadingRelay(t *testing.T) {
 	os.Setenv("SIGNING_SECRET", "TEST_SECRET")
 	// Pass through channel to guarantee availability
-	payload := make(chan ReadingPayload)
+	payload := make(chan Payload)
 
 	// #region Initialize Test Callback Server
 	cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(r.Body)
 
-		var reading ReadingPayload
+		var reading Payload
 		err := decoder.Decode(&reading)
 		if err != nil {
 			http.Error(w, "Bad request: "+err.Error(), http.StatusBadRequest)
@@ -34,8 +33,6 @@ func TestReadingRelay(t *testing.T) {
 		r.Body.Close()
 
 		payload <- reading
-		log.Printf("reading: %+v\n", reading)
-
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer cbServer.Close()
@@ -67,40 +64,73 @@ func TestReadingRelay(t *testing.T) {
 			expected: 202,
 		},
 		{
-			name: "Leading Decimal",
-			payload: ReadingPayload{
-				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
-				Humidity:    ".65",
-				Temperature: "27.01",
-				AirPressure: "15.94",
-				Brightness:  "5380",
-			},
-			expected: 202,
-		},
-		{
-			name: "Trailing Decimal",
-			payload: ReadingPayload{
-				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
-				Humidity:    "65.",
-				Temperature: "27.01",
-				AirPressure: "15.94",
-				Brightness:  "5380",
-			},
-			expected: 202,
-		},
-		{
 			name:     "Bad Request",
 			payload:  ReadingPayload{},
 			expected: 400,
 		},
 		{
-			name: "Not A Number",
+			name: "Bad Timestamp",
+			payload: ReadingPayload{
+				Timestamp:   strconv.FormatInt(10, 10),
+				Humidity:    "65.25",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "5380",
+			},
+			expected: 400,
+		},
+		{
+			name: "Bad Humidity",
 			payload: ReadingPayload{
 				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
 				Humidity:    "wet",
 				Temperature: "27.01",
 				AirPressure: "15.94",
 				Brightness:  "5380",
+			},
+			expected: 400,
+		},
+		{
+			name: "Bad Temperature",
+			payload: ReadingPayload{
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "65.25",
+				Temperature: "hot",
+				AirPressure: "15.94",
+				Brightness:  "5380",
+			},
+			expected: 400,
+		},
+		{
+			name: "Bad Air Pressure",
+			payload: ReadingPayload{
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "65.25",
+				Temperature: "27.01",
+				AirPressure: "crushing",
+				Brightness:  "5380",
+			},
+			expected: 400,
+		},
+		{
+			name: "Bad Brightness (Float)",
+			payload: ReadingPayload{
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "65.25",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "5380.0",
+			},
+			expected: 400,
+		},
+		{
+			name: "Bad Brightness (NaN)",
+			payload: ReadingPayload{
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "65.25",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "blinding",
 			},
 			expected: 400,
 		},
@@ -133,20 +163,19 @@ func TestReadingRelay(t *testing.T) {
 
 			// #region Ensure payload is relayed faithfully
 			relayed := <-payload
-			log.Printf("relayed: %+v\n", relayed)
-			if relayed.Timestamp != testCase.payload.Timestamp {
+			if relayed.Data.Timestamp != testCase.payload.Timestamp {
 				t.Errorf("Unexpected humidity value")
 			}
-			if relayed.Humidity != testCase.payload.Humidity {
+			if relayed.Data.Humidity != testCase.payload.Humidity {
 				t.Errorf("Unexpected humidity value")
 			}
-			if relayed.Temperature != testCase.payload.Temperature {
+			if relayed.Data.Temperature != testCase.payload.Temperature {
 				t.Errorf("Unexpected temperature value")
 			}
-			if relayed.AirPressure != testCase.payload.AirPressure {
+			if relayed.Data.AirPressure != testCase.payload.AirPressure {
 				t.Errorf("Unexpected air_pressure value")
 			}
-			if relayed.Brightness != testCase.payload.Brightness {
+			if relayed.Data.Brightness != testCase.payload.Brightness {
 				t.Errorf("Unexpected brightness value")
 			}
 			// #endregion
@@ -158,38 +187,64 @@ func TestReadingRelay(t *testing.T) {
 
 func TestRetry(t *testing.T) {
 	os.Setenv("SIGNING_SECRET", "TEST_SECRET")
-	// #region Initialize Test Callback Server
-	errs := 0
-
-	cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if errs < 2 {
-			errs += 1
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer cbServer.Close()
-	// #endregion
-
-	pay := ReadingPayload{
-		Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
-		Humidity:    "65.",
-		Temperature: "27.01",
-		AirPressure: "15.94",
-		Brightness:  "5380",
-	}
 
 	client := &http.Client{
 		Timeout: time.Second * 3,
 	}
-	err := postCallback(client, cbServer.URL, pay)
-	if err != nil {
-		t.Errorf("Unexpected error: %+v", err)
+
+	testCases := []struct {
+		name     string
+		status   int
+		expected int
+	}{
+		{
+			name:     "Happy Path",
+			status:   http.StatusOK,
+			expected: 0,
+		},
+		{
+			name:     "Abandon Unrecoverable",
+			status:   http.StatusBadRequest,
+			expected: 1,
+		},
+		{
+			name:     "Attempt Retry",
+			status:   http.StatusInternalServerError,
+			expected: 2,
+		},
 	}
 
-	if errs != 2 {
-		t.Errorf("Expected 3 retries")
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// #region Initialize Test Callback Server
+			errs := 0
+
+			cbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if errs < 2 {
+					if testCase.status >= 400 {
+						errs += 1
+					}
+					w.WriteHeader(testCase.status)
+					return
+				}
+
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer cbServer.Close()
+			// #endregion
+
+			pay := ReadingPayload{
+				Timestamp:   strconv.FormatInt(time.Now().Unix(), 10),
+				Humidity:    "65.",
+				Temperature: "27.01",
+				AirPressure: "15.94",
+				Brightness:  "5380",
+			}
+
+			postCallback(client, cbServer.URL, pay)
+			if errs != testCase.expected {
+				t.Errorf("Expected %d retries", testCase.expected)
+			}
+		})
 	}
 }
