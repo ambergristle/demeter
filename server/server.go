@@ -199,7 +199,7 @@ func postCallback(
 			break
 		}
 
-		// Give the servr some space
+		// Give the server some space
 		backoff := time.Second * time.Duration(math.Pow(2, float64(tries)))
 		time.Sleep(backoff)
 		tries += 1
