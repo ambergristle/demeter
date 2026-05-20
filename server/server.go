@@ -261,7 +261,11 @@ func generateSecret() string {
 	return "whsec_" + base64.StdEncoding.EncodeToString(b)
 }
 
-func withRetry(maxTries int, sleep func(time.Duration), fn func() (bool, error)) error {
+func withRetry(
+	maxTries int,
+	sleep func(time.Duration),
+	fn func() (retry bool, err error),
+) error {
 	for tries := 0; tries < maxTries; tries++ {
 		retry, err := fn()
 		if err != nil {
