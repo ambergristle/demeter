@@ -164,15 +164,14 @@ func postCallback(
 	bodyStr := string(bodyBytes)
 
 	// Allow up to 3 retries, for >= 500
-	tries := 0
-	for tries < 3 {
+	err = withRetry(3, time.Sleep, func() (bool, error) {
 		// #region Construct Request
 		var req *http.Request
 		req, err = http.NewRequest("POST", cbUrl, bodyBuff)
 		if err != nil {
 			// Client or configuration error,
 			// Exit early
-			break
+			return false, err
 		}
 
 		// Unique timestamp, signature for each attempt
@@ -189,21 +188,16 @@ func postCallback(
 		resp, err = client.Do(req)
 		if err != nil {
 			// Client or configuration error
-			break
+			return false, err
 		}
 		defer resp.Body.Close()
 		// Fail if body has length?
 
-		if resp.StatusCode < 500 {
-			// Success, or non-recoverable error
-			break
+		if resp.StatusCode >= 500 {
+			return true, nil
 		}
-
-		// Give the server some space
-		backoff := time.Second * time.Duration(math.Pow(2, float64(tries)))
-		time.Sleep(backoff)
-		tries += 1
-	}
+		return false, nil // Success or non-recoverable error
+	})
 
 	if err != nil {
 		return err
@@ -265,4 +259,18 @@ func generateSecret() string {
 	b := make([]byte, 64)
 	rand.Read(b)
 	return "whsec_" + base64.StdEncoding.EncodeToString(b)
+}
+
+func withRetry(maxTries int, sleep func(time.Duration), fn func() (bool, error)) error {
+	for tries := 0; tries < maxTries; tries++ {
+		retry, err := fn()
+		if err != nil {
+			return err
+		}
+		if !retry {
+			return nil
+		}
+		sleep(time.Second * time.Duration(math.Pow(2, float64(tries))))
+	}
+	return errors.New("Max retries exceeded.")
 }

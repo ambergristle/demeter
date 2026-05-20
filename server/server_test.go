@@ -248,3 +248,18 @@ func TestRetry(t *testing.T) {
 		})
 	}
 }
+
+func TestWithRetry(t *testing.T) {
+	calls := 0
+	mockSleep := func(time.Duration) {}
+
+	// Succeeds on 3rd attempt
+	withRetry(5, mockSleep, func() (bool, error) {
+		calls++
+		return calls < 3, nil  // retry until 3rd call
+	})
+
+	if calls != 3 {
+		t.Errorf("expected 3 calls, got %d", calls)
+	}
+}
