@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -199,7 +200,7 @@ func postCallback(
 		}
 
 		// Give the servr some space
-		backoff := time.Duration(1 * (2 ^ tries))
+		backoff := time.Second * time.Duration(math.Pow(2, float64(tries)))
 		time.Sleep(backoff)
 		tries += 1
 	}
