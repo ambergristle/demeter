@@ -118,8 +118,8 @@ The callback request is secured with an [HMAC signature](https://en.wikipedia.or
 | Header | Value |
 | - | - |
 | `content-type` | `application/x-www-form-urlencoded` |
-| `x-dmtr-timestamp` | Unix UTC timestamp |
-| `x-dmtr-signature` | HMAC signature (body + timestamp) |
+| `webhook-timestamp` | Unix UTC timestamp |
+| `webhook-signature` | HMAC signature (body + timestamp) |
 
 ## Usage
 
@@ -130,7 +130,7 @@ The callback request is secured with an [HMAC signature](https://en.wikipedia.or
 1. Validate request timestamp
 ```go
 // Get timestamp from Header, and parse to int
-requestTimestamp := r.Header.Get("x-dmtr-timestamp")
+requestTimestamp := r.Header.Get("webhook-timestamp")
 timestamp, err := strconv.ParseInt(requestTimestamp, 10, 64)
 // >> 1531420618
 if err != nil {
@@ -166,7 +166,7 @@ signature := "v0=" + hex.EncodeToString(mac.Sum(nil))
 
 4. Compare signatures
 ```go
-requestSignature := r.Header.Get("x-dmtr-signature")
+requestSignature := r.Header.Get("webhook-signature")
 // >> v0=a2114d57b48eac39b9ad189dd8316235a7b4a8d21a10bd27519666489c69b503
 
 // Compare signature bytes without leaking timing info
